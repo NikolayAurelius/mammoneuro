@@ -141,7 +141,8 @@ class Loader:
         return x
 
     def load(self):
-        for index, filename in enumerate(self.part_markup.keys()):
+        self.dataset_filenames = np.array(list(self.part_markup.keys()))
+        for index, filename in enumerate(self.dataset_filenames):
             x = self.txt_file_to_x(f'{self.dataset_path}/txt_files/{filename}')
             y = [int(self.part_markup[filename])]
 
@@ -156,4 +157,4 @@ class Loader:
 
             for step in range(self.part_length // batch_size):
                 curr_indexes = indexes[batch_size * step: batch_size * (step + 1)]
-                yield self.dataset['X'][curr_indexes], self.dataset['Y'][curr_indexes]
+                yield self.dataset_filenames[curr_indexes], self.dataset['X'][curr_indexes], self.dataset['Y'][curr_indexes]
