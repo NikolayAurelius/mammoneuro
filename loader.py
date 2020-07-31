@@ -8,8 +8,9 @@ import os
 
 class Loader:
     def __init__(self, dataset_path='dataset', part='train'):
-        self.mammograph_matrix = np.zeros((18, 18), dtype=np.int32)
+        self.mammograph_matrix = None
         self.init_mammograph_matrix()
+
         self.dataset_path = dataset_path
         self.txt_filenames = os.listdir(f'{self.dataset_path}/txt_files')
         with open(f'{self.dataset_path}/target_by_filename.pickle', 'rb') as f:
@@ -19,37 +20,21 @@ class Loader:
         self.dataset_length = len(self.txt_filenames)
         print(f'Найдено обучающих примеров: {self.dataset_length}')
 
-        filenames = list(self.txt_filenames)
-        np.random.seed(17021999)
-        np.random.shuffle(filenames)
-
-        part_filenames = []
-        if part == 'train':
-            self.part_length = int(self.dataset_length * 0.7)
-            part_filenames.extend(filenames[:int(self.dataset_length * 0.7)])
-        elif part == 'val':
-            self.part_length = int(self.dataset_length * 0.9) - int(self.dataset_length * 0.7)
-            part_filenames.extend(filenames[int(self.dataset_length * 0.7):int(self.dataset_length * 0.9)])
-        elif part == 'test':
-            self.part_length = self.dataset_length - int(self.dataset_length * 0.9)
-            part_filenames.extend(filenames[int(self.dataset_length * 0.9):])
-        elif part == 'val+test':
-            self.part_length = self.dataset_length - int(self.dataset_length * 0.7)
-            part_filenames.extend(filenames[int(self.dataset_length * 0.7):])
-        else:
-            raise ValueError(f'check "part" argument')
-
-        print(f'Part: {part} Количество: {self.part_length}')
-        self.part_markup = {key: self.markup[key] for key in part_filenames}
+        self.split(part)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
                         'Y': torch.zeros((self.part_length, 1), device=self.device)}
 
         self.load()
+        self.work_mode()
+
+    def work_mode(self):
+        del self.mammograph_matrix, self.dataset_length, self.txt_filenames
+        del self.dataset_path, self.part_markup, self.device, self.markup
 
     def init_mammograph_matrix(self):
-        self.mammograph_matrix = self.mammograph_matrix - 1
+        self.mammograph_matrix = np.zeros((18, 18), dtype=np.int32) - 1
         gen = iter(range(256))
 
         for i in range(6, 18 - 6):
@@ -87,6 +72,45 @@ class Loader:
 
         for i in range(6, 18 - 6):
             self.mammograph_matrix[17, i] = next(gen)
+
+    def split(self, part):
+        positive_filenames = list([elem for elem in self.txt_filenames if self.markup[elem]])
+        negative_filenames = list([elem for elem in self.txt_filenames if not self.markup[elem]])
+        print(f'Positive: {len(positive_filenames)} Negative: {len(negative_filenames)} '
+              f'Relation: {len(positive_filenames) / len(self.txt_filenames)}')
+
+        np.random.seed(17021999)
+        np.random.shuffle(positive_filenames)
+        np.random.shuffle(negative_filenames)
+
+        part_filenames = []
+        if part == 'train':
+            b = int(len(positive_filenames) * 0.7)
+            d = int(len(negative_filenames) * 0.7)
+            part_filenames.extend(positive_filenames[:b])
+            part_filenames.extend(negative_filenames[:d])
+
+        elif part == 'val':
+            a, b = int(len(positive_filenames) * 0.7), int(len(positive_filenames) * 0.9)
+            c, d = int(len(negative_filenames) * 0.7), int(len(negative_filenames) * 0.9)
+            part_filenames.extend(positive_filenames[a:b])
+            part_filenames.extend(negative_filenames[c:d])
+        elif part == 'test':
+            a = int(len(positive_filenames) * 0.9)
+            c = int(len(negative_filenames) * 0.9)
+            part_filenames.extend(positive_filenames[a:])
+            part_filenames.extend(negative_filenames[c:])
+        elif part == 'val+test':
+            a = int(len(positive_filenames) * 0.7)
+            c = int(len(negative_filenames) * 0.7)
+            part_filenames.extend(positive_filenames[a:])
+            part_filenames.extend(negative_filenames[c:])
+        else:
+            raise ValueError(f'check "part" argument')
+        self.part_length = len(part_filenames)
+
+        print(f'Part: {part} Количество: {self.part_length}')
+        self.part_markup = {key: self.markup[key] for key in part_filenames}
 
     def txt_file_to_x(self, path):
         with open(path, encoding='cp1251') as f:
