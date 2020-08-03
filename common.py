@@ -3,6 +3,167 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, Callable, Union
 import math
+import numpy as np
+import os
+import pickle
+
+
+class MammographMatrix:
+    def __init__(self):
+        self.matrix = np.zeros((18, 18), dtype=np.int32) - 1
+        gen = iter(range(256))
+
+        for i in range(6, 18 - 6):
+            self.matrix[0, i] = next(gen)
+
+        for i in range(4, 18 - 4):
+            self.matrix[1, i] = next(gen)
+
+        for i in range(3, 18 - 3):
+            self.matrix[2, i] = next(gen)
+
+        for i in range(2, 18 - 2):
+            self.matrix[3, i] = next(gen)
+
+        for j in range(2):
+            for i in range(1, 18 - 1):
+                self.matrix[4 + j, i] = next(gen)
+
+        for j in range(6):
+            for i in range(18):
+                self.matrix[6 + j, i] = next(gen)
+
+        for j in range(2):
+            for i in range(1, 18 - 1):
+                self.matrix[12 + j, i] = next(gen)
+
+        for i in range(2, 18 - 2):
+            self.matrix[14, i] = next(gen)
+
+        for i in range(3, 18 - 3):
+            self.matrix[15, i] = next(gen)
+
+        for i in range(4, 18 - 4):
+            self.matrix[16, i] = next(gen)
+
+        for i in range(6, 18 - 6):
+            self.matrix[17, i] = next(gen)
+
+
+class Loader:
+    def __init__(self, dataset_path='dataset', part='train'):
+        self.mammograph_matrix = MammographMatrix().matrix
+
+        self.dataset_path = dataset_path
+        self.txt_filenames = os.listdir(f'{self.dataset_path}/txt_files')
+        with open(f'{self.dataset_path}/target_by_filename.pickle', 'rb') as f:
+            self.markup = pickle.load(f)
+        self.txt_filenames = list(set(self.txt_filenames).intersection(self.markup.keys()))
+
+        self.dataset_length = len(self.txt_filenames)
+        print(f'Найдено обучающих примеров: {self.dataset_length}')
+
+        self.split(part)
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
+                        'Y': torch.zeros((self.part_length, 1), device=self.device)}
+
+        self.load(normalize=True)
+        self.work_mode()
+
+    def work_mode(self):
+        del self.mammograph_matrix, self.dataset_length, self.txt_filenames
+        del self.dataset_path, self.part_markup, self.device, self.markup
+
+    def split(self, part):
+        positive_filenames = list([elem for elem in self.txt_filenames if self.markup[elem]])
+        negative_filenames = list([elem for elem in self.txt_filenames if not self.markup[elem]])
+        print(f'Positive: {len(positive_filenames)} Negative: {len(negative_filenames)} '
+              f'Relation: {len(positive_filenames) / len(self.txt_filenames)}')
+
+        np.random.seed(17021999)
+        np.random.shuffle(positive_filenames)
+        np.random.shuffle(negative_filenames)
+
+        part_filenames = []
+        if part == 'train':
+            b = int(len(positive_filenames) * 0.7)
+            d = int(len(negative_filenames) * 0.7)
+            part_filenames.extend(positive_filenames[:b])
+            part_filenames.extend(negative_filenames[:d])
+
+        elif part == 'val':
+            a, b = int(len(positive_filenames) * 0.7), int(len(positive_filenames) * 0.9)
+            c, d = int(len(negative_filenames) * 0.7), int(len(negative_filenames) * 0.9)
+            part_filenames.extend(positive_filenames[a:b])
+            part_filenames.extend(negative_filenames[c:d])
+        elif part == 'test':
+            a = int(len(positive_filenames) * 0.9)
+            c = int(len(negative_filenames) * 0.9)
+            part_filenames.extend(positive_filenames[a:])
+            part_filenames.extend(negative_filenames[c:])
+        elif part == 'val+test':
+            a = int(len(positive_filenames) * 0.7)
+            c = int(len(negative_filenames) * 0.7)
+            part_filenames.extend(positive_filenames[a:])
+            part_filenames.extend(negative_filenames[c:])
+        else:
+            raise ValueError(f'check "part" argument')
+        self.part_length = len(part_filenames)
+
+        print(f'Part: {part} Количество: {self.part_length}')
+        self.part_markup = {key: self.markup[key] for key in part_filenames}
+
+    def txt_file_to_x(self, path):
+        with open(path, encoding='cp1251') as f:
+            need_check = True
+            lst = []
+            for line in f.readlines():
+                if need_check and line.count('0;') != 0:
+                    need_check = False
+                elif not need_check:
+                    pass
+                else:
+                    continue
+
+                one_x = np.zeros((18, 18))
+                line = line[:-2].split(';')
+
+                for i in range(18):
+                    for j in range(18):
+                        one_x[i, j] = int(line[i * 18 + j])
+                lst.append(one_x)
+
+            x = np.zeros((18, 18, 18, 18))
+
+            for i in range(18):
+                for j in range(18):
+                    if self.mammograph_matrix[i, j] != -1:
+                        x[i, j] = lst[self.mammograph_matrix[i, j] - 1]
+        return x
+
+    def load(self, normalize:bool = False):
+        self.dataset_filenames = np.array(list(self.part_markup.keys()))
+        for index, filename in enumerate(self.dataset_filenames):
+            x = self.txt_file_to_x(f'{self.dataset_path}/txt_files/{filename}')
+            y = [int(self.part_markup[filename])]
+
+            self.dataset['X'][index] = torch.Tensor(x).type(torch.FloatTensor).to(device=self.device)
+            self.dataset['Y'][index] = torch.Tensor(y).type(torch.LongTensor).to(device=self.device)
+
+            if normalize:
+                self.dataset['X'][index] = self.dataset['X'][index] / torch.max(self.dataset['X'][index])
+
+    def generator(self, batch_size=64):
+        batch_size = min(batch_size, self.part_length)
+        indexes = list(range(self.part_length))
+        while True:
+            np.random.shuffle(indexes)
+
+            for step in range(self.part_length // batch_size):
+                curr_indexes = indexes[batch_size * step: batch_size * (step + 1)]
+                yield self.dataset_filenames[curr_indexes], self.dataset['X'][curr_indexes], self.dataset['Y'][curr_indexes]
 
 
 class ConvNd(nn.Module):
@@ -231,8 +392,8 @@ def conv4d(input_channels, output_channels, kernel_size, stride=1, padding=0, is
 
 
 class Augmentator():
-    def __init__(self, generator, concatenate: bool = True):
-        self.generator = generator
+    def __init__(self, func_generator, concatenate: bool = True):
+        self.func_generator = func_generator
         self.concatenate = concatenate
 
     def rotate(self, x: torch.Tensor, k: int) -> torch.Tensor:
@@ -250,10 +411,88 @@ class Augmentator():
         result['rev_x6'] = self.reverse(result['x6'])
         result['rev_x9'] = self.reverse(result['x9'])
         if self.concatenate:
-            return None  # TODO:
+            x = result.pop('x')
+            for key in result.keys():
+                x = torch.cat((x, result[key]), dim=0)
+            return x
 
         return result
 
-    def generator(self):
-        for filename, x, target in self.generator():
+    def generator(self, batch_size):
+        for filename, x, target in self.func_generator(batch_size):
             yield filename, self.augmention(x), target
+
+
+class History:
+    def __init__(self, metrics: list, report_period: int):
+        self.length = 0
+        self.report_period = report_period
+        self.history_of_metrics = {}
+        self.metrics = metrics
+        for metric in self.metrics:
+            self.history_of_metrics[metric] = []
+
+    def append(self, **kwargs):
+        if self.length % self.report_period == 0:
+            self.report()
+
+        for metric in self.metrics:
+            value = kwargs[metric]
+            self.history_of_metrics[metric].append(value)
+
+        self.length += 1
+
+    def report(self):
+        result = {}
+        msg = ''
+        for metric in self.metrics:
+            last_history = self.history_of_metrics[metric]
+            if self.length > self.report_period:
+                last_history = last_history[-self.report_period:]
+
+            last_history.sort()
+
+            result[metric] = {'min': last_history[0],
+                              'mean': sum(last_history) / len(last_history),
+                              'max': last_history[-1]}
+
+            msg += f'{metric}: {result[metric]}'
+
+        print(msg)
+
+
+def sub_mean_by_neighbors(x, i, j, k, l):
+    value = 0
+    denominator = 0 
+    for a in range(-1, 1 + 1):
+        for b in range(-1, 1 + 1):
+            for c in range(-1, 1 + 1):
+                for d in range(-1, 1 + 1):
+                    try:
+                        part = x[i + a, j + b, k + c, d + l]
+                        if part == 0:
+                            continue
+                        denominator += 1
+                        value += part
+                    except IndexError:
+                        pass
+    return value / denominator
+
+
+def mean_by_neighbors(x):
+    new_x = np.array(x[0, 0])
+    matrix = MammographMatrix().matrix
+    for i in range(18):
+        for j in range(18):
+            for k in range(18):
+                for l in range(18):
+                    if matrix[i, j] == -1 or matrix[k, l] == -1:
+                        print(x[0, 0, i, j, k, l])
+                        continue
+
+                    new_x[i, j, k, l] = sub_mean_by_neighbors(x[0, 0], i, j, k, l)
+
+
+
+def visualize(x):
+    pass

@@ -2,14 +2,14 @@ import pickle
 import torch
 import numpy as np
 import os
-
+from common import MammographMatrix
 
 # torch.rot90
 
+
 class Loader:
     def __init__(self, dataset_path='dataset', part='train'):
-        self.mammograph_matrix = None
-        self.init_mammograph_matrix()
+        self.mammograph_matrix = MammographMatrix().matrix
 
         self.dataset_path = dataset_path
         self.txt_filenames = os.listdir(f'{self.dataset_path}/txt_files')
@@ -26,52 +26,12 @@ class Loader:
         self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
                         'Y': torch.zeros((self.part_length, 1), device=self.device)}
 
-        self.load()
+        self.load(normalize=True)
         self.work_mode()
 
     def work_mode(self):
         del self.mammograph_matrix, self.dataset_length, self.txt_filenames
         del self.dataset_path, self.part_markup, self.device, self.markup
-
-    def init_mammograph_matrix(self):
-        self.mammograph_matrix = np.zeros((18, 18), dtype=np.int32) - 1
-        gen = iter(range(256))
-
-        for i in range(6, 18 - 6):
-            self.mammograph_matrix[0, i] = next(gen)
-
-        for i in range(4, 18 - 4):
-            self.mammograph_matrix[1, i] = next(gen)
-
-        for i in range(3, 18 - 3):
-            self.mammograph_matrix[2, i] = next(gen)
-
-        for i in range(2, 18 - 2):
-            self.mammograph_matrix[3, i] = next(gen)
-
-        for j in range(2):
-            for i in range(1, 18 - 1):
-                self.mammograph_matrix[4 + j, i] = next(gen)
-
-        for j in range(6):
-            for i in range(18):
-                self.mammograph_matrix[6 + j, i] = next(gen)
-
-        for j in range(2):
-            for i in range(1, 18 - 1):
-                self.mammograph_matrix[12 + j, i] = next(gen)
-
-        for i in range(2, 18 - 2):
-            self.mammograph_matrix[14, i] = next(gen)
-
-        for i in range(3, 18 - 3):
-            self.mammograph_matrix[15, i] = next(gen)
-
-        for i in range(4, 18 - 4):
-            self.mammograph_matrix[16, i] = next(gen)
-
-        for i in range(6, 18 - 6):
-            self.mammograph_matrix[17, i] = next(gen)
 
     def split(self, part):
         positive_filenames = list([elem for elem in self.txt_filenames if self.markup[elem]])
@@ -140,7 +100,7 @@ class Loader:
                         x[i, j] = lst[self.mammograph_matrix[i, j] - 1]
         return x
 
-    def load(self):
+    def load(self, normalize:bool = False):
         self.dataset_filenames = np.array(list(self.part_markup.keys()))
         for index, filename in enumerate(self.dataset_filenames):
             x = self.txt_file_to_x(f'{self.dataset_path}/txt_files/{filename}')
@@ -148,6 +108,9 @@ class Loader:
 
             self.dataset['X'][index] = torch.Tensor(x).type(torch.FloatTensor).to(device=self.device)
             self.dataset['Y'][index] = torch.Tensor(y).type(torch.LongTensor).to(device=self.device)
+
+            if normalize:
+                self.dataset['X'][index] = self.dataset['X'][index] / torch.max(self.dataset['X'][index])
 
     def generator(self, batch_size=64):
         batch_size = min(batch_size, self.part_length)
