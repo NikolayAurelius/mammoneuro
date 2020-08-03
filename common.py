@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Callable
+from typing import Tuple, Callable, Union
 import math
 
 
@@ -12,9 +12,9 @@ class ConvNd(nn.Module):
                  out_channels: int,
                  num_dims: int,
                  kernel_size: Tuple,
-                 stride,
-                 padding,
-                 is_transposed=False,
+                 stride: Union[int, Tuple],
+                 padding: Union[int, Tuple],
+                 is_transposed: bool = False,
                  padding_mode='zeros',
                  output_padding=0,
                  dilation: int = 1,
@@ -222,10 +222,38 @@ class ConvNd(nn.Module):
             return result
 
 
-def conv4d(input_channels, output_channels, kernel_size, is_transposed=False):
+def conv4d(input_channels, output_channels, kernel_size, stride=1, padding=0, is_transposed=False, bias=True):
     return ConvNd(input_channels, output_channels, 4, kernel_size,
-                  stride=1, padding=0, use_bias=True, is_transposed=is_transposed,
+                  stride=stride, padding=padding, use_bias=bias, is_transposed=is_transposed,
                   padding_mode='zeros', groups=1,
                   kernel_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.1),
                   bias_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.001))
 
+
+class Augmentator():
+    def __init__(self, generator, concatenate: bool = True):
+        self.generator = generator
+        self.concatenate = concatenate
+
+    def rotate(self, x: torch.Tensor, k: int) -> torch.Tensor:
+        res_x = torch.rot90(x, k, (2, 3))
+        return torch.rot90(res_x, k, (4, 5))
+
+    def reverse(self, x: torch.Tensor) -> torch.Tensor:
+        res_x = torch.flip(x, (3, ))
+        return torch.flip(res_x, (5, ))
+
+    def augmention(self, x):
+        result = {'x': x, 'x3': self.rotate(x, k=3), 'x6': self.rotate(x, k=2), 'x9': self.rotate(x, k=1)}
+        result['rev_x'] = self.reverse(result['x'])
+        result['rev_x3'] = self.reverse(result['x3'])
+        result['rev_x6'] = self.reverse(result['x6'])
+        result['rev_x9'] = self.reverse(result['x9'])
+        if self.concatenate:
+            return None  # TODO:
+
+        return result
+
+    def generator(self):
+        for filename, x, target in self.generator():
+            yield filename, self.augmention(x), target
