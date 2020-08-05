@@ -11,6 +11,7 @@ import pickle
 class MammographMatrix:
     def __init__(self):
         self.matrix = np.zeros((18, 18), dtype=np.int32) - 1
+        self.matrix_inverse = np.zeros((18, 18), dtype=np.int32) + 1
         gen = iter(range(256))
 
         for i in range(6, 18 - 6):
@@ -49,9 +50,14 @@ class MammographMatrix:
         for i in range(6, 18 - 6):
             self.matrix[17, i] = next(gen)
 
+        for i in range(18):
+            for j in range(18):
+                if self.matrix[i, j] != -1:
+                    self.matrix_inverse[i, j] = 0
+
 
 class Loader:
-    def __init__(self, dataset_path='dataset', part='train'):
+    def __init__(self, dataset_path: str = 'dataset', part: str = 'train'):
         self.mammograph_matrix = MammographMatrix().matrix
 
         self.dataset_path = dataset_path
@@ -76,7 +82,7 @@ class Loader:
         del self.mammograph_matrix, self.dataset_length, self.txt_filenames
         del self.dataset_path, self.part_markup, self.device, self.markup
 
-    def split(self, part):
+    def split(self, part: str):
         positive_filenames = list([elem for elem in self.txt_filenames if self.markup[elem]])
         negative_filenames = list([elem for elem in self.txt_filenames if not self.markup[elem]])
         print(f'Positive: {len(positive_filenames)} Negative: {len(negative_filenames)} '
@@ -115,7 +121,7 @@ class Loader:
         print(f'Part: {part} Количество: {self.part_length}')
         self.part_markup = {key: self.markup[key] for key in part_filenames}
 
-    def txt_file_to_x(self, path):
+    def txt_file_to_x(self, path: str):
         with open(path, encoding='cp1251') as f:
             need_check = True
             lst = []
@@ -143,7 +149,7 @@ class Loader:
                         x[i, j] = lst[self.mammograph_matrix[i, j] - 1]
         return x
 
-    def load(self, normalize:bool = False):
+    def load(self, normalize: bool = False):
         self.dataset_filenames = np.array(list(self.part_markup.keys()))
         for index, filename in enumerate(self.dataset_filenames):
             x = self.txt_file_to_x(f'{self.dataset_path}/txt_files/{filename}')
@@ -155,7 +161,7 @@ class Loader:
             if normalize:
                 self.dataset['X'][index] = self.dataset['X'][index] / torch.max(self.dataset['X'][index])
 
-    def generator(self, batch_size=64):
+    def generator(self, batch_size: int = 64):
         batch_size = min(batch_size, self.part_length)
         indexes = list(range(self.part_length))
         while True:
@@ -164,6 +170,10 @@ class Loader:
             for step in range(self.part_length // batch_size):
                 curr_indexes = indexes[batch_size * step: batch_size * (step + 1)]
                 yield self.dataset_filenames[curr_indexes], self.dataset['X'][curr_indexes], self.dataset['Y'][curr_indexes]
+
+    def aug_generator(self, batch_size: int = 16, need_concatenate: bool = True):
+        self.augmentator = Augmentator(self)
+        return self.augmentator.generator(batch_size, need_concatenate)
 
 
 class ConvNd(nn.Module):
@@ -392,9 +402,8 @@ def conv4d(input_channels, output_channels, kernel_size, stride=1, padding=0, is
 
 
 class Augmentator():
-    def __init__(self, func_generator, concatenate: bool = True):
-        self.func_generator = func_generator
-        self.concatenate = concatenate
+    def __init__(self, loader):
+        self.loader = loader
 
     def rotate(self, x: torch.Tensor, k: int) -> torch.Tensor:
         res_x = torch.rot90(x, k, (2, 3))
@@ -404,13 +413,13 @@ class Augmentator():
         res_x = torch.flip(x, (3, ))
         return torch.flip(res_x, (5, ))
 
-    def augmention(self, x):
+    def augmention(self, x, need_concatenate):
         result = {'x': x, 'x3': self.rotate(x, k=3), 'x6': self.rotate(x, k=2), 'x9': self.rotate(x, k=1)}
         result['rev_x'] = self.reverse(result['x'])
         result['rev_x3'] = self.reverse(result['x3'])
         result['rev_x6'] = self.reverse(result['x6'])
         result['rev_x9'] = self.reverse(result['x9'])
-        if self.concatenate:
+        if need_concatenate:
             x = result.pop('x')
             for key in result.keys():
                 x = torch.cat((x, result[key]), dim=0)
@@ -418,9 +427,10 @@ class Augmentator():
 
         return result
 
-    def generator(self, batch_size):
-        for filename, x, target in self.func_generator(batch_size):
-            yield filename, self.augmention(x), target
+    def generator(self, batch_size: int = 16, need_concatenate: bool = True):
+        # TODO: Добавить режим случайного выбора аугментаций?
+        for filename, x, target in self.loader.generator(batch_size):
+            yield filename, self.augmention(x, need_concatenate), target
 
 
 class History:
