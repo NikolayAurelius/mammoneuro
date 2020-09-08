@@ -57,14 +57,19 @@ class MammographMatrix:
 
 
 class Loader:
-    def __init__(self, dataset_path: str = 'dataset', part: str = 'train'):
+    def __init__(self, dataset_path: str = 'dataset', part: str = 'train', lst: list = [],
+                 normalize: bool = True, normalize_func=lambda x: x):
         self.mammograph_matrix = MammographMatrix().matrix
 
         self.dataset_path = dataset_path
         self.txt_filenames = os.listdir(f'{self.dataset_path}/txt_files')
         with open(f'{self.dataset_path}/target_by_filename.pickle', 'rb') as f:
             self.markup = pickle.load(f)
+
         self.txt_filenames = list(set(self.txt_filenames).intersection(self.markup.keys()))
+
+        if len(lst) != 0:
+            self.txt_filenames = list(set(self.txt_filenames).intersection(set(lst)))
 
         self.dataset_length = len(self.txt_filenames)
         print(f'Найдено обучающих примеров: {self.dataset_length}')
@@ -75,7 +80,8 @@ class Loader:
         self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
                         'Y': torch.zeros((self.part_length, 1), device=self.device)}
 
-        self.load(normalize=True)
+        self.normalize_func = normalize_func
+        self.load(normalize=normalize)
         self.work_mode()
 
     def work_mode(self):
@@ -114,6 +120,9 @@ class Loader:
             c = int(len(negative_filenames) * 0.7)
             part_filenames.extend(positive_filenames[a:])
             part_filenames.extend(negative_filenames[c:])
+        elif part == 'all':
+            part_filenames.extend(positive_filenames)
+            part_filenames.extend(negative_filenames)
         else:
             raise ValueError(f'check "part" argument')
         self.part_length = len(part_filenames)
@@ -159,7 +168,7 @@ class Loader:
             self.dataset['Y'][index] = torch.Tensor(y).type(torch.LongTensor).to(device=self.device)
 
             if normalize:
-                self.dataset['X'][index] = self.dataset['X'][index] / torch.max(self.dataset['X'][index])
+                self.dataset['X'][index] = self.normalize_func(self.dataset['X'][index])
 
     def generator(self, batch_size: int = 64):
         batch_size = min(batch_size, self.part_length)
@@ -393,11 +402,12 @@ class ConvNd(nn.Module):
             return result
 
 
-def conv4d(input_channels, output_channels, kernel_size, stride=1, padding=0, is_transposed=False, bias=True):
+def conv4d(input_channels, output_channels, kernel_size, stride=1, padding=0, is_transposed=False, bias=True,
+           groups=1, kernel_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.1)):
     return ConvNd(input_channels, output_channels, 4, kernel_size,
                   stride=stride, padding=padding, use_bias=bias, is_transposed=is_transposed,
-                  padding_mode='zeros', groups=1,
-                  kernel_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.1),
+                  padding_mode='zeros', groups=groups,
+                  kernel_initializer=kernel_initializer,
                   bias_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.001))
 
 
@@ -430,6 +440,9 @@ class Augmentator():
     def generator(self, batch_size: int = 16, need_concatenate: bool = True):
         # TODO: Добавить режим случайного выбора аугментаций?
         for filename, x, target in self.loader.generator(batch_size):
+            # target = torch.cat([target for _ in range(8)], axis=0) Is wrong
+
+
             yield filename, self.augmention(x, need_concatenate), target
 
 
@@ -473,7 +486,7 @@ class History:
 
 def sub_mean_by_neighbors(x, i, j, k, l):
     value = 0
-    denominator = 0 
+    denominator = 0
     for a in range(-1, 1 + 1):
         for b in range(-1, 1 + 1):
             for c in range(-1, 1 + 1):
