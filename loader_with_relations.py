@@ -1,5 +1,5 @@
 import pickle
-#import torch
+import torch
 import numpy as np
 import os
 from common import MammographMatrix
@@ -23,11 +23,11 @@ class Loader:
         self.split(tosplit)
  
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        #self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
-        #                'Y': torch.zeros((self.part_length, 1), device=self.device)}
+        self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
+                        'Y': torch.zeros((self.part_length, 1), device=self.device)}
  
-        #self.load(normalize=True)
-        #self.work_mode()
+        self.load(normalize=True)
+        self.work_mode()
  
     def work_mode(self):
         del self.mammograph_matrix, self.dataset_length, self.txt_filenames
