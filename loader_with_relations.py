@@ -2,7 +2,7 @@ import pickle
 import torch
 import numpy as np
 import os
-from common import MammographMatrix
+from mammoneuro.common import MammographMatrix
 
 class Loader:
     def __init__(self, dataset_path: str = 'dataset', tosplit = None):
