@@ -2,7 +2,8 @@ import pickle
 import torch
 import numpy as np
 import os
-from mammoneuro.common import MammographMatrix
+from common import MammographMatrix
+
 
 class Loader:
     def __init__(self, dataset_path: str = 'dataset', tosplit = None):
@@ -33,10 +34,10 @@ class Loader:
         del self.mammograph_matrix, self.dataset_length, self.txt_filenames
         del self.dataset_path, self.part_markup, self.device, self.markup
  
- 
+
     def split(self, tosplit = (1., 1.)):
 
-        if (tosplit):
+        if tosplit:
         
           target_rltn, side_rltn = tosplit
 
@@ -100,8 +101,6 @@ class Loader:
         print(f'Количество: {self.part_length}')
         self.part_markup = {key: self.markup[key] for key in self.part_filenames}
 
-
-
     def txt_file_to_x(self, path: str):
         with open(path, encoding='cp1251') as f:
             need_check = True
@@ -152,6 +151,73 @@ class Loader:
                 curr_indexes = indexes[batch_size * step: batch_size * (step + 1)]
                 yield self.dataset_filenames[curr_indexes], self.dataset['X'][curr_indexes], self.dataset['Y'][curr_indexes]
 
-    def aug_generator(self, batch_size: int = 16, need_concatenate: bool = True):
-        self.augmentator = Augmentator(self)
-        return self.augmentator.generator(batch_size, need_concatenate)
+
+class AmplAugmentator:
+
+    def __init__(self, loader):
+        self.loader = loader
+
+    def meas_to_x(self, meas: np.array = np.zeros((18, 18, 18, 18, 80)), w=10000., wd=300000.):
+
+        t_meas = torch.tensor(meas).float()
+        smeas, _ = torch.sort(t_meas, axis=4)
+        mxmn = torch.tensor((smeas[:, :, :, :, -1] - smeas[:, :, :, :, 0]) / 2, requires_grad=False)
+        ones = torch.ones_like(mxmn)
+
+        A = torch.tensor((smeas[:, :, :, :, -1] - smeas[:, :, :, :, 0]) / 2, requires_grad=True)
+        w = torch.tensor(w)
+        epsilon = torch.tensor(torch.zeros_like(A), requires_grad=True)
+        b = torch.tensor(torch.mean(t_meas, axis=4), requires_grad=True)
+        wd = torch.tensor(wd)
+
+        t = lambda i: t(i - 1) + (1. / wd) if i > 0 else i
+        y = lambda i: (torch.abs(A) * torch.sin(2 * np.pi * w * ones * t(i) + epsilon) + b) * (mxmn != 0.0)
+
+        optimizer = torch.optim.SGD(
+            [{'params': [epsilon], 'lr': 0.01}, {'params': [A], 'lr': 100000}, {'params': [b], 'lr': 10000}])
+
+        loss = meas.shape[-1] * 40 + 1
+        k = 0
+        while loss > (meas.shape[-1] * 40):
+            # for k in range(2000):
+
+            optimizer.zero_grad()
+            loss = 0.0
+
+            for i in range(0, meas.shape[-1]):
+                target = t_meas[:, :, :, :, i]
+                y_pred = y(i)
+                vloss = torch.mean(torch.abs(y_pred - target))
+                vloss.backward()
+                loss += vloss
+
+            optimizer.step()
+
+            if k % 500 == 0:
+                print(meas.shape[-1])
+                print('Iteration: ', k)
+                print('Loss: ', loss.item())
+
+            k += 1
+
+        return A.detach().numpy()
+
+    def idxs_generator(self, length):
+        return random.sample([i for i in range(80)], length)
+
+    def get_new_amplitude(self, meas, dots_kolvo=3):
+
+        new_meas = np.zeros((18, 18, 18, 18, dots_kolvo))
+
+        for i in range(18):
+            for j in range(18):
+                for k in range(18):
+                    for l in range(18):
+                        sin = meas[i, j, k, l]
+                        new_meas[i, j, k, l] = sin[idxs_generator(dots_kolvo)]
+
+        return self.meas_to_x(new_meas)
+
+    def generator(self, batch_size: int = 16):
+        for filename, x, target in self.loader.generator(batch_size):
+            yield filename, self.get_new_amplitude(x), target
