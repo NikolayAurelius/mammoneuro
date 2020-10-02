@@ -506,3 +506,207 @@ def mean_by_neighbors(x):
 
 def visualize(x):
     pass
+
+
+# layers for N-dim
+
+from torch.nn.parameter import Parameter
+
+
+class BtchNormalization(nn.Module):
+
+  def __init__(self, num_features):
+
+    super(BtchNormalization, self).__init__()
+
+    self.num_features = num_features
+    self.weight = Parameter(torch.ones(num_features))
+    self.bias = Parameter(torch.zeros(num_features))
+
+  def forward(self, x):
+
+    dims = tuple(i for i in range(len(x.shape)) if i!= 1) # return all axis except 1
+
+    x_mean = x.mean(dim = dims, keepdim=True)
+    x_var = x.var(dim = dims, keepdim=True, unbiased = False)
+    eps = 1e-5
+
+    x = torch.div(x - x_mean, torch.sqrt(x_var + eps))
+
+    shp = tuple(1 if i!= 1 else self.num_features for i in range(len(x.shape))) # return (1, num_features, 1, 1, ...)
+
+    return self.weight.reshape(shp) * x + self.bias.reshape(shp) 
+
+
+from typing import Tuple
+
+
+class UpsamplingN(nn.Module):
+
+  def __init__(self, num_dims, size = None, scale_factor = 0):
+    
+    super(UpsamplingN, self).__init__()
+
+    self.num_dims = num_dims
+    self.size = size
+    if self.size == None:
+        if not isinstance(scale_factor, Tuple):
+          self.scale_factor = tuple(scale_factor for _ in range(num_dims))
+        else:
+          assert num_dims == len(scale_factor), 'wrong scale factor shape'
+          self.scale_factor = scale_factor
+    else:
+      assert len(self.size) == num_dims, 'wrong shape size'
+      self.scale_factor = None
+
+  def forward(self, x):
+    
+    if self.scale_factor == None:
+
+      assert self.size, 'no size info'
+
+      orig_shape = x.shape[2:]
+      ratios = tuple(self.size[i]/orig_shape[i] for i in range(self.num_dims))
+      self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),/
+                                                   return_counts = True)[1], dims = [0]) for i in range(self.num_dims)]
+
+    ans = x.detach().clone()
+    for i in range(self.num_dims):
+      ans = ans.repeat_interleave(self.scale_factor[i], dim = i + 2)
+
+    return ans
+
+
+from typing import Tuple, Callable
+import math
+
+
+class MaxPoolNd(nn.Module):
+   
+    def __init__(self,
+                 num_dims: int,
+                 kernel_size: Tuple,
+                 stride = None,
+                 padding = 0,
+                 dilation: int = 1):
+        super(MaxPoolNd, self).__init__()
+
+        if stride == None:
+          stride = kernel_size
+        # ---------------------------------------------------------------------
+        # Assertions for constructor arguments
+        # ---------------------------------------------------------------------
+        if not isinstance(kernel_size, Tuple):
+            kernel_size = tuple(kernel_size for _ in range(num_dims))
+        if not isinstance(stride, Tuple):
+            stride = tuple(stride for _ in range(num_dims))
+        if not isinstance(padding, Tuple):
+            padding = tuple(padding for _ in range(num_dims))
+        if not isinstance(dilation, Tuple):
+            dilation = tuple(dilation for _ in range(num_dims))
+
+        # This parameter defines which Pytorch MaxPool to use as a base
+        if num_dims<=3:
+            max_dims = num_dims - 1
+        else:
+            max_dims = 3
+
+        self.pool_f = (nn.MaxPool1d, nn.MaxPool2d, nn.MaxPool3d)[max_dims - 1]
+
+        assert len(kernel_size) == num_dims, \
+            'nD kernel size expected!'
+        assert len(stride) == num_dims, \
+            'nD stride size expected!'
+        assert len(padding) == num_dims, \
+            'nD padding size expected!'       
+        assert sum(dilation) == num_dims, \
+            'Dilation rate other than 1 not yet implemented!'
+
+# ---------------------------------------------------------------------
+        # Store constructor arguments
+        # ---------------------------------------------------------------------
+
+        self.num_dims = num_dims
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+
+
+        self.pool_layers = torch.nn.ModuleList()
+
+        # Compute the next dimension, so for a MaxPool4D, get index 3
+        next_dim_len = self.kernel_size[0]
+        
+        for _ in range(next_dim_len):
+            if self.num_dims-1 > max_dims:
+                # Initialize a MaxPool_n-1_D layer
+                pool_layer = MaxPoolNd(num_dims=self.num_dims-1,
+                                            kernel_size=self.kernel_size[1:],
+                                            stride=self.stride[1:],
+                                            dilation=self.dilation[1:],
+                                            padding=self.padding[1:])
+
+            else:
+                # Initialize a MaxPool layer
+                pool_layer = self.pool_f(kernel_size=self.kernel_size[1:],
+                                            dilation=self.dilation[1:],
+                                            stride=self.stride[1:],
+                                            padding=self.padding[1:])
+
+            # Store the layer
+            self.pool_layers.append(pool_layer)
+
+    # -------------------------------------------------------------------------
+
+    def forward(self, input):
+        
+        padding = list(self.padding)
+
+        inputShape = list(input.shape)
+        inputShape[2] += 2*self.padding[0]
+        padSize = (0,0,self.padding[0],self.padding[0])
+        padding[0] = 0
+        input = F.pad(input.view(input.shape[0],input.shape[1],input.shape[2],-1),padSize).view(inputShape)
+
+        # Define shortcut names for dimensions of input and kernel
+        (b, c_i) = tuple(input.shape[0:2])
+        size_i = tuple(input.shape[2:])
+        size_k = self.kernel_size
+
+        # Compute the size of the output tensor based on the zero padding
+        size_o = tuple([math.floor((size_i[x] + 2 * padding[x] - size_k[x]) / self.stride[x] + 1) for x in range(len(size_i))])
+        # Compute size of the output without stride
+        size_ons = tuple([size_i[x] - size_k[x] + 1 for x in range(len(size_i))])
+
+
+        # Output tensors for each 3D frame
+        frame_results = size_o[0] * [torch.zeros((b,input.shape[1]) + size_o[1:], device=input.device)]
+        empty_frames = size_o[0] * [None]
+
+        for i in range(size_k[0]):
+            # iterate inputs first dimmension
+            for j in range(size_i[0]):
+
+                # Add results to this output frame
+
+                out_frame = j - (i - size_k[0] // 2) - (size_i[0] - size_ons[0]) // 2 - (1-size_k[0]%2) 
+                k_center_position = out_frame % self.stride[0]
+                out_frame = math.floor(out_frame / self.stride[0])
+                if k_center_position != 0:
+                    continue
+                
+                if out_frame < 0 or out_frame >= size_o[0]:
+                    continue
+
+                # Prepate input for next dimmension
+                pool_input = input.view(b, c_i, size_i[0], -1)
+                pool_input = pool_input[:, :, j, :].view((b, c_i) + size_i[1:])
+
+                # Pooling
+                frame_pool = self.pool_layers[i](pool_input)
+                
+                frame_results[out_frame] =  torch.max(frame_pool, frame_results[out_frame])
+
+        result = torch.stack(frame_results, dim=2)
+        return result
