@@ -4,3 +4,6 @@
 /dataset/raw/
 /junk_code.ipynb
 /loader.py
+/.idea/
+/__pycache__/
+/learning/

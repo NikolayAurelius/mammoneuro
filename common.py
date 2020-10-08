@@ -567,7 +567,7 @@ class UpsamplingN(nn.Module):
 
       orig_shape = x.shape[2:]
       ratios = tuple(self.size[i]/orig_shape[i] for i in range(self.num_dims))
-      self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),/
+      self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),\
                                                    return_counts = True)[1], dims = [0]) for i in range(self.num_dims)]
 
     ans = x.detach().clone()
