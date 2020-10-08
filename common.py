@@ -580,7 +580,8 @@ class UpsamplingN(nn.Module):
       self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),
                                                    return_counts = True)[1], dims = [0]) for i in range(self.num_dims)]
 
-    ans = x.clone()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ans = x.clone().to(device)
     for i in range(self.num_dims):
       ans = ans.repeat_interleave(self.scale_factor[i], dim=i + 2)
 
@@ -716,7 +717,7 @@ class MaxPoolNd(nn.Module):
                 # Pooling
                 frame_pool = self.pool_layers[i](pool_input)
                 
-                frame_results[out_frame] =  torch.max(frame_pool, frame_results[out_frame])
+                frame_results[out_frame] = torch.max(frame_pool, frame_results[out_frame])
 
         result = torch.stack(frame_results, dim=2)
         return result
