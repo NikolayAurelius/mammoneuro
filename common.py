@@ -57,14 +57,19 @@ class MammographMatrix:
 
 
 class Loader:
-    def __init__(self, dataset_path: str = 'dataset', part: str = 'train'):
+    def __init__(self, dataset_path: str = 'dataset', part: str = 'train', lst: list = [],
+                 normalize: bool = True, normalize_func=lambda x: x):
         self.mammograph_matrix = MammographMatrix().matrix
 
         self.dataset_path = dataset_path
         self.txt_filenames = os.listdir(f'{self.dataset_path}/txt_files')
         with open(f'{self.dataset_path}/target_by_filename.pickle', 'rb') as f:
             self.markup = pickle.load(f)
+
         self.txt_filenames = list(set(self.txt_filenames).intersection(self.markup.keys()))
+
+        if len(lst) != 0:
+            self.txt_filenames = list(set(self.txt_filenames).intersection(set(lst)))
 
         self.dataset_length = len(self.txt_filenames)
         print(f'Найдено обучающих примеров: {self.dataset_length}')
@@ -75,7 +80,8 @@ class Loader:
         self.dataset = {'X': torch.zeros((self.part_length, 1, 18, 18, 18, 18), device=self.device),
                         'Y': torch.zeros((self.part_length, 1), device=self.device)}
 
-        self.load(normalize=True)
+        self.normalize_func = normalize_func
+        self.load(normalize=normalize)
         self.work_mode()
 
     def work_mode(self):
@@ -114,6 +120,9 @@ class Loader:
             c = int(len(negative_filenames) * 0.7)
             part_filenames.extend(positive_filenames[a:])
             part_filenames.extend(negative_filenames[c:])
+        elif part == 'all':
+            part_filenames.extend(positive_filenames)
+            part_filenames.extend(negative_filenames)
         else:
             raise ValueError(f'check "part" argument')
         self.part_length = len(part_filenames)
@@ -159,7 +168,7 @@ class Loader:
             self.dataset['Y'][index] = torch.Tensor(y).type(torch.LongTensor).to(device=self.device)
 
             if normalize:
-                self.dataset['X'][index] = self.dataset['X'][index] / torch.max(self.dataset['X'][index])
+                self.dataset['X'][index] = self.normalize_func(self.dataset['X'][index])
 
     def generator(self, batch_size: int = 64):
         batch_size = min(batch_size, self.part_length)
@@ -174,6 +183,7 @@ class Loader:
     def aug_generator(self, batch_size: int = 16, need_concatenate: bool = True):
         self.augmentator = Augmentator(self)
         return self.augmentator.generator(batch_size, need_concatenate)
+
 
 
 class ConvNd(nn.Module):
@@ -567,12 +577,12 @@ class UpsamplingN(nn.Module):
 
       orig_shape = x.shape[2:]
       ratios = tuple(self.size[i]/orig_shape[i] for i in range(self.num_dims))
-      self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),\
+      self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),
                                                    return_counts = True)[1], dims = [0]) for i in range(self.num_dims)]
 
-    ans = x.detach().clone()
+    ans = x.clone()
     for i in range(self.num_dims):
-      ans = ans.repeat_interleave(self.scale_factor[i], dim = i + 2)
+      ans = ans.repeat_interleave(self.scale_factor[i], dim=i + 2)
 
     return ans
 
