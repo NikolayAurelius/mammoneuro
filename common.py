@@ -553,39 +553,38 @@ from typing import Tuple
 
 class UpsamplingN(nn.Module):
 
-  def __init__(self, num_dims, size = None, scale_factor = 0):
-    
-    super(UpsamplingN, self).__init__()
+    def __init__(self, num_dims, size=None, scale_factor=0):
 
-    self.num_dims = num_dims
-    self.size = size
-    if self.size == None:
-        if not isinstance(scale_factor, Tuple):
-          self.scale_factor = tuple(scale_factor for _ in range(num_dims))
+        super(UpsamplingN, self).__init__()
+
+        self.num_dims = num_dims
+        self.size = size
+        if not self.size:
+            if not isinstance(scale_factor, Tuple):
+                self.scale_factor = tuple(scale_factor for _ in range(num_dims))
+            else:
+                assert num_dims == len(scale_factor), 'wrong scale factor shape'
+                self.scale_factor = scale_factor
         else:
-          assert num_dims == len(scale_factor), 'wrong scale factor shape'
-          self.scale_factor = scale_factor
-    else:
-      assert len(self.size) == num_dims, 'wrong shape size'
-      self.scale_factor = None
+            assert len(self.size) == num_dims, 'wrong shape size'
+            self.scale_factor = None
 
-  def forward(self, x):
-    
-    if self.scale_factor == None:
+    def forward(self, x):
 
-      assert self.size, 'no size info'
+        if not self.scale_factor:
+            assert self.size, 'no size info'
 
-      orig_shape = x.shape[2:]
-      ratios = tuple(self.size[i]/orig_shape[i] for i in range(self.num_dims))
-      self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1)/ratios[i]),
-                                                   return_counts = True)[1], dims = [0]) for i in range(self.num_dims)]
+            orig_shape = x.shape[2:]
+            ratios = tuple(self.size[i] / orig_shape[i] for i in range(self.num_dims))
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.scale_factor = [torch.flip(torch.unique(torch.ceil((torch.arange(self.size[i]) + 1) / ratios[i]),
+                                                         return_counts=True)[1], dims=[0]).to(device) for i in
+                                 range(self.num_dims)]
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    ans = x.clone().to(device)
-    for i in range(self.num_dims):
-      ans = ans.repeat_interleave(self.scale_factor[i], dim=i + 2)
-
-    return ans
+        ans = x.clone()
+        for i in range(self.num_dims):
+            ans = ans.repeat_interleave(self.scale_factor[i], dim=i + 2)
+        return ans
 
 
 from typing import Tuple, Callable
