@@ -719,7 +719,7 @@ class MaxPoolNd(nn.Module):
         return result
 
 
-# ---------------- finding dtart lr ----------- #
+# ---------------- finding start lr ----------- #
 def longest_pos_interval(ar):
 
     max_len, cur_len, idx = 0, 0, -1
