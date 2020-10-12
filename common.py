@@ -542,8 +542,11 @@ class BtchNormalization(nn.Module):
 
         shp = tuple(
             1 if i != 1 else self.num_features for i in range(len(x.shape)))  # return (1, num_features, 1, 1, ...)
+        ans = self.weight.reshape(shp) * x + self.bias.reshape(shp)
 
-        return self.weight.reshape(shp) * x + self.bias.reshape(shp)
+        del dims
+        del shp
+        return ans
 
 
 from typing import Tuple
@@ -721,7 +724,6 @@ class MaxPoolNd(nn.Module):
 
 # ---------------- finding start lr ----------- #
 def longest_pos_interval(ar):
-
     max_len, cur_len, idx = 0, 0, -1
 
     for i in range(len(ar)):
@@ -736,7 +738,6 @@ def longest_pos_interval(ar):
 
 
 def lr_by_plot(lrs, losses, interpolate_len=20):
-
     interp_lrs = np.linspace(lrs[0], lrs[-1], interpolate_len)
     interp_losses = np.interp(interp_lrs, lrs, losses)
     intrvl_len, idx = longest_pos_interval(interp_losses[:-1] - interp_losses[1:])
