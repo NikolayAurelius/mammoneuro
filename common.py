@@ -720,3 +720,51 @@ class MaxPoolNd(nn.Module):
 
         result = torch.stack(frame_results, dim=2)
         return result
+
+
+def find_start_lr(model, optimizer, batch_size=64, init_value=1e-8, final_value=10, num=100, beta=0.98):
+
+    q = (final_value / init_value) ** (1 / (num - 1))
+    lr = init_value
+    avg_loss = 0.
+    best_loss = 0.
+    losses = []
+    log_lrs = []
+
+    optimizer.param_groups[0]['lr'] = lr
+
+    train_gen = train.generator(batch_size)
+
+    for batch_num in range(1, num + 1):
+
+        filename, x, target = train_gen.__next__()
+
+        optimizer.zero_grad()
+        loss = compute_grad(model, x, target)
+        optimizer.step()
+
+        # Compute the smoothed loss
+        avg_loss = beta * avg_loss + (1 - beta) * loss
+        smoothed_loss = avg_loss / (1 - beta ** batch_num)
+
+        # Stop if the loss is exploding
+        if batch_num > 1 and smoothed_loss > 3 * best_loss:
+            break
+
+        # Record the best loss
+        if smoothed_loss < best_loss or batch_num == 1:
+            best_loss = smoothed_loss
+
+        losses.append(smoothed_loss)
+        log_lrs.append(np.log10(lr))
+
+        # Update the lr for the next step
+        lr *= q
+        optimizer.param_groups[0]['lr'] = lr
+
+        # if batch_num % 20 == 0:
+        #  print(batch_num)
+
+    rec_lr = lr_by_plot(log_lrs[5:-10], losses[5:-10])
+    print('Recommended learning rate: ', rec_lr)
+    return rec_lr, log_lrs, losses
