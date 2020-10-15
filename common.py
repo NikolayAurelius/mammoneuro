@@ -332,7 +332,8 @@ class ConvNd(nn.Module):
                 padSize = (0, 0, self.padding[0], self.padding[0])
                 padding[0] = 0
                 if self.padding_mode is 'zeros':
-                    input = F.pad(input.reshape(input.shape[0], input.shape[1], input.shape[2], -1), padSize, 'constant',
+                    input = F.pad(input.reshape(input.shape[0], input.shape[1], input.shape[2], -1), padSize,
+                                  'constant',
                                   0).view(inputShape)
                 else:
                     input = F.pad(input.reshape(input.shape[0], input.shape[1], input.shape[2], -1), padSize,
@@ -554,12 +555,15 @@ from typing import Tuple
 
 class UpsamplingN(nn.Module):
 
-    def __init__(self, num_dims, size=None, scale_factor=0):
+    def __init__(self, num_dims: int, scale_factor=0, size=None, mode='nearest'):
 
         super(UpsamplingN, self).__init__()
-
         self.num_dims = num_dims
         self.size = size
+        self.mode = mode
+        assert mode == 'nearest' or mode == '4linear', 'unknown mode'
+        if mode == '4linear':
+            assert num_dims == 4, 'should be 4 dim'
         if not self.size:
             if not isinstance(scale_factor, Tuple):
                 self.scale_factor = tuple(scale_factor for _ in range(num_dims))
@@ -569,6 +573,9 @@ class UpsamplingN(nn.Module):
         else:
             assert len(self.size) == num_dims, 'wrong shape size'
             self.scale_factor = None
+            if mode == '4linear':
+                self.model1 = nn.Upsample(size=self.size[1:], mode='trilinear').cuda()
+                self.model2 = nn.Upsample(size=(self.size[0:1] + self.size[2:]), mode='trilinear').cuda()
 
     def forward(self, x):
 
@@ -582,10 +589,38 @@ class UpsamplingN(nn.Module):
                                                          return_counts=True)[1], dims=[0]).to(device) for i in
                                  range(self.num_dims)]
 
-        ans = x.clone()
-        for i in range(self.num_dims):
-            ans = ans.repeat_interleave(self.scale_factor[i], dim=i + 2)
-        return ans
+        if not self.size:
+            try:
+                self.size = tuple(sum(el) for el in self.scale_factor)
+            except TypeError:
+                self.size = tuple(x.shape[2:][i] * self.scale_factor[i] for i in range(self.num_dims))
+            if mode == '4linear':
+                self.model1 = nn.Upsample(size=self.size[1:], mode='trilinear')
+                self.model2 = nn.Upsample(size=(self.size[0:1] + self.size[2:]), mode='trilinear')
+
+        if self.mode == 'nearest':
+            ans = x.clone()
+            for i in range(self.num_dims):
+                ans = ans.repeat_interleave(self.scale_factor[i], dim=i + 2)
+
+        elif self.mode == '4linear':
+            # интерполяция по последним трем осям
+            old_size = x.shape
+            new_size = old_size[0:3] + self.size[1:]
+            new_x = torch.zeros(size=new_size)
+            for i in range(old_size[2]):
+                new_x[:, :, i] = self.model1(x[:, :, i])
+
+                # интерполяция по оставшейся оси
+            ans = torch.zeros(size=old_size[:2] + self.size)
+            for i in range(self.size[0]):
+                ans[:, :, :, i] = self.model2(new_x[:, :, :, i])
+
+            del new_X
+            del new_size
+            del old_size
+
+        return ans.cuda()
 
 
 from typing import Tuple, Callable
