@@ -332,10 +332,10 @@ class ConvNd(nn.Module):
                 padSize = (0, 0, self.padding[0], self.padding[0])
                 padding[0] = 0
                 if self.padding_mode is 'zeros':
-                    input = F.pad(input.view(input.shape[0], input.shape[1], input.shape[2], -1), padSize, 'constant',
+                    input = F.pad(input.reshape(input.shape[0], input.shape[1], input.shape[2], -1), padSize, 'constant',
                                   0).view(inputShape)
                 else:
-                    input = F.pad(input.view(input.shape[0], input.shape[1], input.shape[2], -1), padSize,
+                    input = F.pad(input.reshape(input.shape[0], input.shape[1], input.shape[2], -1), padSize,
                                   self.padding_mode).view(inputShape)
 
         # Define shortcut names for dimensions of input and kernel
