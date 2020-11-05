@@ -594,7 +594,7 @@ class UpsamplingN(nn.Module):
                 self.size = tuple(sum(el) for el in self.scale_factor)
             except TypeError:
                 self.size = tuple(x.shape[2:][i] * self.scale_factor[i] for i in range(self.num_dims))
-            if mode == '4linear':
+            if self.mode == '4linear':
                 self.model1 = nn.Upsample(size=self.size[1:], mode='trilinear')
                 self.model2 = nn.Upsample(size=(self.size[0:1] + self.size[2:]), mode='trilinear')
 
