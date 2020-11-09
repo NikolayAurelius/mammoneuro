@@ -616,7 +616,7 @@ class UpsamplingN(nn.Module):
             for i in range(self.size[0]):
                 ans[:, :, :, i] = self.model2(new_x[:, :, :, i])
 
-            del new_X
+            del new_x
             del new_size
             del old_size
 
