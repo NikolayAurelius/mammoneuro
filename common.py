@@ -403,10 +403,10 @@ class ConvNd(nn.Module):
 
 
 def conv4d(input_channels, output_channels, kernel_size, stride=1, padding=0, is_transposed=False, bias=True,
-           groups=1, kernel_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.1)):
+           groups=1, kernel_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.1), padding_mode='zeros'):
     return ConvNd(input_channels, output_channels, 4, kernel_size,
                   stride=stride, padding=padding, use_bias=bias, is_transposed=is_transposed,
-                  padding_mode='zeros', groups=groups,
+                  padding_mode=padding_mode, groups=groups,
                   kernel_initializer=kernel_initializer,
                   bias_initializer=lambda x: torch.nn.init.normal_(x, mean=0.0, std=0.001))
 
