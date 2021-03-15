@@ -6,54 +6,7 @@ import math
 import numpy as np
 import os
 import pickle
-
-
-class MammographMatrix:
-    def __init__(self):
-        self.matrix = np.zeros((18, 18), dtype=np.int32) - 1
-        self.matrix_inverse = np.zeros((18, 18), dtype=np.int32) + 1
-        gen = iter(range(256))
-
-        for i in range(6, 18 - 6):
-            self.matrix[0, i] = next(gen)
-
-        for i in range(4, 18 - 4):
-            self.matrix[1, i] = next(gen)
-
-        for i in range(3, 18 - 3):
-            self.matrix[2, i] = next(gen)
-
-        for i in range(2, 18 - 2):
-            self.matrix[3, i] = next(gen)
-
-        for j in range(2):
-            for i in range(1, 18 - 1):
-                self.matrix[4 + j, i] = next(gen)
-
-        for j in range(6):
-            for i in range(18):
-                self.matrix[6 + j, i] = next(gen)
-
-        for j in range(2):
-            for i in range(1, 18 - 1):
-                self.matrix[12 + j, i] = next(gen)
-
-        for i in range(2, 18 - 2):
-            self.matrix[14, i] = next(gen)
-
-        for i in range(3, 18 - 3):
-            self.matrix[15, i] = next(gen)
-
-        for i in range(4, 18 - 4):
-            self.matrix[16, i] = next(gen)
-
-        for i in range(6, 18 - 6):
-            self.matrix[17, i] = next(gen)
-
-        for i in range(18):
-            for j in range(18):
-                if self.matrix[i, j] != -1:
-                    self.matrix_inverse[i, j] = 0
+from mammo_packets import read_from_file_binary, parse_mammograph_raw_data
 
 
 class Loader:
@@ -519,3 +472,147 @@ def mean_by_neighbors(x):
 
 def visualize(x):
     pass
+
+
+class LiteMeas:
+    def __init__(self, path, use_cache=True):
+        self.path = path
+        self.filename = self.path.split('/')[-1]
+        self.use_cache = use_cache
+        self.matrix = MammographMatrix()
+        self.raw_data = None
+        self.amplitudes_data = None
+
+        self.red_green_mask = None
+
+        self.load()
+        self.save()
+
+    def save(self):
+        if not os.path.exists('cache'):
+            os.mkdir('cache')
+
+        with open(f'cache/{self.filename}.pickle', 'wb') as f:
+            pickle.dump(self.__dict__, f)
+
+    def load(self):
+        cache_path = f'cache/{self.filename}.pickle'
+
+        if self.use_cache and os.path.exists(cache_path):
+            with open(cache_path, 'rb') as f:
+                try:
+                    self.__dict__ = pickle.load(f)
+                    print('Взято из кэша')
+                except (pickle.UnpicklingError, EOFError):
+                    os.remove(cache_path)
+            return None
+
+        if '.txt' in self.filename:
+            self.raw_data = self.txt_file_to_x(self.path)
+        else:
+            self.raw_data = parse_mammograph_raw_data(read_from_file_binary(self.path))
+        self.amplitudes_data = self.restore_amplitudes()
+
+    def restore_amplitudes(self):
+        sar = np.sort(self.raw_data, axis=4)
+
+        mx = sar[:, :, :, :, -1]
+        mn = sar[:, :, :, :, 0]
+        return (mx - mn) / 2
+
+    def raw_signal(self, x_listener, y_listener, x_generator, y_generator):
+        return self.raw_data[x_listener, y_listener, x_generator, y_generator]
+
+    def __str__(self):
+        return self.path.split('/')[-1]
+
+    def txt_file_to_x(self, path: str):
+        with open(path, encoding='cp1251') as f:
+            need_check = True
+            lst = []
+            for line in f.readlines():
+                if need_check and line.count('0;') != 0:
+                    need_check = False
+                elif not need_check:
+                    pass
+                else:
+                    continue
+
+                one_x = np.zeros((18, 18))
+                line = line[:-2].split(';')
+
+                for i in range(18):
+                    for j in range(18):
+                        one_x[i, j] = int(line[i * 18 + j])
+                lst.append(one_x)
+
+            x = np.zeros((18, 18, 18, 18))
+
+            for i in range(18):
+                for j in range(18):
+                    if self.matrix.matrix[i, j] != -1:
+                        x[i, j] = lst[self.matrix.matrix[i, j]]
+                        print(i, j, self.matrix.matrix[i, j], lst[self.matrix.matrix[i, j]])
+        res = np.zeros((18, 18, 18, 18, 80))
+
+        for i, j in self.matrix.coordinate_generator():
+            for k, l in self.matrix.coordinate_generator():
+                for t in range(80):
+                    res[i, j, k, l, t] = x[i, j, k, l] * np.sin(2 * np.pi * 100_000 * (t / 1200_000))
+
+        return res
+
+
+class MammographMatrix:
+    def __init__(self):
+        self.matrix = np.zeros((18, 18), dtype=np.int32) - 1
+        self.matrix_inverse = np.zeros((18, 18), dtype=np.int32) + 1
+        gen = iter(range(256))
+
+        for i in range(6, 18 - 6):
+            self.matrix[0, i] = next(gen)
+
+        for i in range(4, 18 - 4):
+            self.matrix[1, i] = next(gen)
+
+        for i in range(3, 18 - 3):
+            self.matrix[2, i] = next(gen)
+
+        for i in range(2, 18 - 2):
+            self.matrix[3, i] = next(gen)
+
+        for j in range(2):
+            for i in range(1, 18 - 1):
+                self.matrix[4 + j, i] = next(gen)
+
+        for j in range(6):
+            for i in range(18):
+                self.matrix[6 + j, i] = next(gen)
+
+        for j in range(2):
+            for i in range(1, 18 - 1):
+                self.matrix[12 + j, i] = next(gen)
+
+        for i in range(2, 18 - 2):
+            self.matrix[14, i] = next(gen)
+
+        for i in range(3, 18 - 3):
+            self.matrix[15, i] = next(gen)
+
+        for i in range(4, 18 - 4):
+            self.matrix[16, i] = next(gen)
+
+        for i in range(6, 18 - 6):
+            self.matrix[17, i] = next(gen)
+
+        for i in range(18):
+            for j in range(18):
+                if self.matrix[i, j] != -1:
+                    self.matrix_inverse[i, j] = 0
+
+    def coordinate_generator(self):
+        for x in range(18):
+            for y in range(18):
+                if self.matrix[x, y] == -1:
+                    continue
+                yield x, y
