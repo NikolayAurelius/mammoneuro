@@ -6,7 +6,7 @@ import math
 import numpy as np
 import os
 import pickle
-from mammo_packets import read_from_file_binary, parse_mammograph_raw_data
+from .mammo_packets import read_from_file_binary, parse_mammograph_raw_data
 
 
 class Loader:
