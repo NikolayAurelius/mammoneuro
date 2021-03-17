@@ -108,7 +108,7 @@ class Loader:
             for i in range(18):
                 for j in range(18):
                     if self.mammograph_matrix[i, j] != -1:
-                        x[i, j] = lst[self.mammograph_matrix[i, j] - 1]
+                        x[i, j] = lst[self.mammograph_matrix[i, j]] # -1?
         return x
 
     def load(self, normalize: bool = False):
