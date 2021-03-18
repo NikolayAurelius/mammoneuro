@@ -552,7 +552,6 @@ class LiteMeas:
                 for j in range(18):
                     if self.matrix.matrix[i, j] != -1:
                         x[i, j] = lst[self.matrix.matrix[i, j]]
-                        print(i, j, self.matrix.matrix[i, j], lst[self.matrix.matrix[i, j]])
         res = np.zeros((18, 18, 18, 18, 80))
 
         for i, j in self.matrix.coordinate_generator():

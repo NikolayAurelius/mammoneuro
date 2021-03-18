@@ -3,3 +3,4 @@ numpy==1.19.1
 dahuffman==0.4.1
 matplotlib==3.3.2
 seaborn==0.10.1
+torchmetrics==0.2.0
